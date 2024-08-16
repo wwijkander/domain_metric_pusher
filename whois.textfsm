@@ -1,0 +1,13 @@
+Value List status ([a-zA-Z_\-:/#]+)
+Value expiryDate ([0-9a-zA-Z\-\.:\s/]+)
+Value List nServer ([0-9a-zA-Z\.\-:\s]+)
+Value dnssec ([a-zA-Z\.\-\s]+)
+Value registrar (.+)
+
+Start
+  ^(?i)\s*(domain\s)*status\.*:\s*${status}
+  ^(?i)\s*(\[有効期限]|paid-till:|(registr(y|ar\sregistration)\s)*expir(y|e(s|-date)|ation)(\sdate|\stime)*\.*:)\s*${expiryDate}
+  ^(?i)\s*(name\s|n)server\.*:\s*${nServer}
+  ^(?i)\s*dnssec\.*:\s*${dnssec}
+  ^(?i)\s*registrar\.*:\s*${registrar}
+

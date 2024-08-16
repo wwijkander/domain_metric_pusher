@@ -1,51 +1,52 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"io/ioutil"
-	"net/http"
+	"log"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
+	"slices"
 	"time"
 
+	"log/slog"
+
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/domainr/whois"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/version"
-	"github.com/alecthomas/kingpin/v2"
+	"github.com/sirikothe/gotextfsm"
 	"gopkg.in/yaml.v2"
 )
 
 var (
-	// How often to check domains
-	checkRate = 12 * time.Hour
-
-	configFile = kingpin.Flag("config", "Domain exporter configuration file.").Default("domains.yml").Envar("CONFIG").String()
-	httpBind   = kingpin.Flag("bind", "The address to listen on for HTTP requests.").Default(":9203").String()
+	configFile   = kingpin.Flag("config", "Domain exporter configuration file.").Default("domains.yml").Envar("CONFIG").String()
+	templateFile = kingpin.Flag("template", "Registry whois output FSM template file.").Default("whois.textfsm").Envar("CONFIG").String()
+	pushGateway  = kingpin.Flag("pushgateway", "host:port where Pushgateway lives").Default("http://localhost:9091").Envar("CONFIG").String()
+	debugWhois   = kingpin.Flag("debug-whois", "print whois output and skip pushing metrics").Envar("CONFIG").Bool()
 
 	domainExpiration = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "domain_expiration_seconds",
-			Help: "UNIX timestamp when the WHOIS record states this domain will expire",
+			Help: "Epoch timestamp when the WHOIS record states this domain will expire",
 		},
 		[]string{"domain"},
 	)
-	parsedExpiration = prometheus.NewGaugeVec(
+	stateConsistent = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "domain_expiration_parsed",
-			Help: "That the domain date was parsed",
+			Name: "domain_state_desired",
+			Help: "That the domain is in the configured desired state in registry",
 		},
 		[]string{"domain"},
 	)
-
-	expiryRegex = regexp.MustCompile(`(?i)(\[有効期限]|Registry Expiry Date|paid-till|Expiration Date|Expiration Time|Expiry.*|expires.*|expire-date)[?:|\s][ \t](.*)`)
+	parsedSuccessfully = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "domain_information_last_successfully_parsed",
+			Help: "Last epoch time that the desired domain information was looked up successfully",
+		},
+	)
 
 	formats = []string{
 		"2006-01-02",
@@ -59,8 +60,9 @@ var (
 		"Mon Jan 2006 15:04:05",
 		"2006-01-02 15:04:05-07",
 		"2006-01-02 15:04:05",
-		"2.1.2006 15:04:05",
+		"2.1.2006 15:04:05", // fi.
 		"02/01/2006 15:04:05",
+		"02.01.2006", // ax.
 	}
 
 	config promlog.Config
@@ -68,144 +70,165 @@ var (
 )
 
 type Config struct {
-	Domains []string `yaml:"domains"`
+	Domains []ConfigDomain `yaml:"domains"`
+}
+
+type ConfigDomain struct {
+	Domain      string   `yaml:"domain"`
+	Status      []string `yaml:"status,omitempty"`
+	Nameservers []string `yaml:"nameservers,omitempty"`
+	Dnssec      string   `yaml:"dnssec,omitempty"`
+	Registrar   string   `yaml:"registrar,omitempty"`
 }
 
 func main() {
 	flag.AddFlags(kingpin.CommandLine, &config)
-	kingpin.Version(version.Print("domain_exporter"))
+	kingpin.Version(version.Print("domain_metric_pusher"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
-	logger = promlog.New(&config)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{AddSource: true}))
+	slog.SetDefault(logger)
 
-	level.Info(logger).Log("msg", "Starting domain_exporter", "version", version.Info())
-	level.Info(logger).Log("msg", "Build context", version.BuildContext())
+	log.Println("Starting domain_metric_pusher", "version", version.Info())
+	log.Println("Build context", version.BuildContext())
 
 	prometheus.Register(domainExpiration)
-	prometheus.Register(parsedExpiration)
+	prometheus.Register(stateConsistent)
+	prometheus.Register(parsedSuccessfully)
 
 	config := Config{}
 
+	templateFilename, err := filepath.Abs(*templateFile)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	template, err := ioutil.ReadFile(templateFilename)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	filename, err := filepath.Abs(*configFile)
 	if err != nil {
-		level.Warn(logger).Log("warn", err)
+		log.Fatalln(err)
 	}
+
 	yamlFile, err := ioutil.ReadFile(filename)
-
 	if err != nil {
-		level.Warn(logger).Log("warn", err)
-		level.Warn(logger).Log("warn", "Configuration file not present, you'll have to /probe me for metrics.")
+		log.Fatalln(err)
 	}
+
 	err = yaml.Unmarshal(yamlFile, &config)
-
 	if err != nil {
-		level.Warn(logger).Log("warn", err)
-	} else {
-		go func() {
-			for {
-				for _, query := range config.Domains {
-					_, err = lookup(query, domainExpiration, parsedExpiration)
-					if err != nil {
-						level.Warn(logger).Log("warn", err)
-					}
-					continue
-				}
-				time.Sleep(checkRate)
-			}
-		}()
+		log.Fatalln(err)
 	}
+	for _, domain := range config.Domains {
+		req, err := whois.NewRequest(domain.Domain)
+		if err != nil {
+			log.Fatalln(err)
+		}
 
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/probe", func(w http.ResponseWriter, r *http.Request) {
-		probeHandler(w, r, logger)
-	})
-	level.Info(logger).Log("msg", "Listening", "port", *httpBind)
-	if err := http.ListenAndServe(*httpBind, nil); err != nil {
-		level.Error(logger).Log("msg", "Error starting HTTP server", "err", err)
-		os.Exit(1)
+		res, err := whois.DefaultClient.Fetch(req)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		if *debugWhois {
+			log.Printf("DEBUG: WHOIS output for : %s\n%s", domain.Domain, res.Body)
+		}
+
+		domainConsistency, date := parse(domain, res.Body, template)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		log.Printf("Domain %s expires at date %v", domain.Domain, date)
+		if domainConsistency == 1 {
+			log.Printf("Domain %s: all other domain settings as expected", domain.Domain)
+		}
+
+		domainExpiration.WithLabelValues(domain.Domain).Set(float64(date.Unix()))
+		stateConsistent.WithLabelValues(domain.Domain).Set(domainConsistency)
 	}
+	parsedSuccessfully.SetToCurrentTime()
+	log.Println("Successfully collected all data")
+	if !*debugWhois {
+		if err := push.New(*pushGateway, "domain_metrics_pusher").
+			Collector(domainExpiration).
+			Collector(stateConsistent).
+			Collector(parsedSuccessfully).
+			//Grouping("", "").
+			Push(); err != nil {
+			log.Fatalln("Could not push metrics to Pushgateway:", err)
+		}
+		log.Println("Successfully pushed all data to Pushgateway, done!")
+	}
+	return
 }
 
-func probeHandler(w http.ResponseWriter, r *http.Request, logger log.Logger) {
-	probeExpiration := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "domain_expiration",
-			Help: "Days until the WHOIS record states this domain will expire",
-		},
-		[]string{"domain"},
-	)
-	probeUnfindableExpiration := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "domain_expiration_unfindable",
-			Help: "That the domain date could not be parsed, or the domain doesn't have a whois record",
-		},
-		[]string{"domain"},
-	)
-
-	registry := prometheus.NewRegistry()
-	registry.MustRegister(probeExpiration)
-	registry.MustRegister(probeUnfindableExpiration)
-	params := r.URL.Query()
-	target := params.Get("target")
-	if target == "" {
-		http.Error(w, "Target parameter is missing", http.StatusBadRequest)
-		return
-	}
-	_, err := lookup(target, probeExpiration, parsedExpiration)
+func parse(configDomain ConfigDomain, res []byte, template []byte) (float64, time.Time) {
+	fsm := gotextfsm.TextFSM{}
+	err := fsm.ParseString(string(template))
 	if err != nil {
-		level.Warn(logger).Log("warn", err)
-		http.Error(w, fmt.Sprintf("Don't know how to parse: %q", target), http.StatusBadRequest)
-		return
+		log.Fatalf("Error while parsing template '%s'\n", err.Error())
+	}
+	parser := gotextfsm.ParserOutput{}
+	err = parser.ParseTextString(string(res), fsm, true)
+	if err != nil {
+		log.Fatalf("Error while parsing input '%s'\n", err.Error())
 	}
 
-	h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-	h.ServeHTTP(w, r)
+	var rawDate string
+	var parametersConsistent float64
+	parametersConsistent = 1
+	for _, v := range parser.Dict {
+		//fmt.Printf("Parsed output: %v\n", v)
+		rawDate = v["expiryDate"].(string)
+		//rawDate = strings.TrimSpace(rawDate)
+		if len(rawDate) < 1 {
+			log.Fatalf("Domain %s: don't know how to parse domain WHOIS output", configDomain.Domain)
+		}
+
+		configStatus := configDomain.Status
+		actualStatus := v["status"].([]string)
+		slices.Sort(configStatus)
+		slices.Sort(actualStatus)
+		if len(configStatus) > 0 && !slices.Equal(configStatus, actualStatus) {
+			parametersConsistent = 0
+			log.Printf("Domain %s WHOIS status %s is not the same as configured expected status %s", configDomain.Domain, actualStatus, configStatus)
+
+		}
+		if len(configDomain.Dnssec) > 0 && configDomain.Dnssec != v["dnssec"].(string) {
+			parametersConsistent = 0
+			log.Printf("Domain %s WHOIS dnssec status %s is not the same as configured expected dnssec status %s", configDomain.Domain, v["dnssec"].(string), configDomain.Dnssec)
+
+		}
+		if len(configDomain.Registrar) > 0 && configDomain.Registrar != v["registrar"].(string) {
+			parametersConsistent = 0
+			log.Printf("Domain %s WHOIS registrar %s is not the same as configured expected registrar %s", configDomain.Domain, v["registrar"].(string), configDomain.Registrar)
+
+		}
+		configNameservers := configDomain.Nameservers
+		actualNameservers := v["nServer"].([]string)
+		slices.Sort(configNameservers)
+		slices.Sort(actualNameservers)
+		if len(configNameservers) > 0 && !slices.Equal(configNameservers, actualNameservers) {
+			parametersConsistent = 0
+			log.Printf("Domain %s WHOIS nameservers %s is not the same as configured expected nameservers  %s", configDomain.Domain, actualNameservers, configNameservers)
+
+		}
+	}
+
+	return parametersConsistent, parseDate(rawDate, configDomain.Domain)
 }
 
-func parse(host string, res []byte) (float64, error) {
-	results := expiryRegex.FindStringSubmatch(string(res))
-	if len(results) < 1 {
-		err := fmt.Errorf("Don't know how to parse domain: %s", host)
-		level.Warn(logger).Log("warn", err.Error())
-		return -2, err
-	}
-
+func parseDate(rawDate string, domain string) time.Time {
 	for _, format := range formats {
-		if date, err := time.Parse(format, strings.TrimSpace(results[2])); err == nil {
-			level.Info(logger).Log("domain:", host, "date", date)
-			return float64(date.Unix()), nil
+		if date, err := time.Parse(format, rawDate); err == nil {
+			return date
 		}
 
 	}
-	return -1, errors.New(fmt.Sprintf("Unable to parse date: %s, for %s\n", strings.TrimSpace(results[2]), host))
-}
-
-func lookup(domain string, handler *prometheus.GaugeVec, parsedExpiration *prometheus.GaugeVec) (float64, error) {
-	req, err := whois.NewRequest(domain)
-	if err != nil {
-		return -1, err
-	}
-
-	res, err := whois.DefaultClient.Fetch(req)
-	if err != nil {
-		return -1, err
-	}
-
-	date, err := parse(domain, res.Body)
-	if err != nil {
-		if parsedExpiration != nil {
-			parsedExpiration.WithLabelValues(domain).Set(0)
-		}
-		return -1, err
-	}
-
-	if handler != nil {
-		handler.WithLabelValues(domain).Set(date)
-	}
-	if parsedExpiration != nil {
-		parsedExpiration.WithLabelValues(domain).Set(1)
-	}
-
-	return date, nil
+	log.Fatalf("Domain %s: unable to parse raw date to timestamp: %s\n", domain, rawDate)
+	return time.Time{}
 }

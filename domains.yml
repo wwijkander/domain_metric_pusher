@@ -1,0 +1,42 @@
+domains:
+  - domain: 0x5e.se
+    status:
+      - serverUpdateProhibited
+      - serverDeleteProhibited
+      - serverTransferProhibited
+    nameservers:
+      - ns-a.0x5e.se 91.209.0.11 2001:67c:2e74:1::11
+      - ns-b.0x5e.se 85.197.153.196 2a05:e840:851::5
+      - ns.axu.tm 80.83.7.5
+      - ns.trex.fi 195.140.195.20
+    dnssec: signed delegation
+    registrar: SpaceDump IT AB
+  - domain: dn.se
+    status: 
+      - ok
+  - domain: dh.ax
+    status:
+      - Registered
+  - domain: bahnhof.net
+  - domain: root-servers.net
+    status:
+      - serverUpdateProhibited
+      - serverDeleteProhibited
+      - serverTransferProhibited
+    nameservers:
+      - A.ROOT-SERVERS.NET
+      - B.ROOT-SERVERS.NET
+      - C.ROOT-SERVERS.NET
+      - D.ROOT-SERVERS.NET
+      - E.ROOT-SERVERS.NET
+      - F.ROOT-SERVERS.NET
+      - G.ROOT-SERVERS.NET
+      - H.ROOT-SERVERS.NET
+      - I.ROOT-SERVERS.NET
+      - J.ROOT-SERVERS.NET
+      - K.ROOT-SERVERS.NET
+      - L.ROOT-SERVERS.NET
+      - M.ROOT-SERVERS.NET
+      - ö.root-servers.net
+    dnssec: unsigned
+    registrar: Netwörk Solutions, LLC 
