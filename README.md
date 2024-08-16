@@ -1,66 +1,64 @@
-# domain_exporter
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fshift%2Fdomain_exporter.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fshift%2Fdomain_exporter?ref=badge_shield)
+# domain_metric_pusher
 
 
-Very simple service which performs WHOIS lookups for a list of domains provided in the "config" file and exposes them on a "/metrics" endpoint for consumption via Prometheus.
-
-```yaml
-domains:
-  - google.com
-  - google.co.uk
-```
+Simple job which performs WHOIS lookups for a list of domains provided in the "config" file and pushes the expiry date and if other settings match configuration as metrics to Prometheus through Pushgateway.
 
 Flags:
 ```bash
-usage: domain_exporter [<flags>]
+usage: domain_metric_pusher [<flags>]
 
 Flags:
-  -h, --help                  Show context-sensitive help (also try --help-long and --help-man).
-      --config="domains.yml"  Domain exporter configuration file.
-      --bind=":9203"          The address to listen on for HTTP requests.
+  -h, --[no-]help             Show context-sensitive help (also try --help-long and --help-man).
+      --config="domains.yml"  Domain exporter configuration file. ($CONFIG)
+      --template="whois.textfsm"  
+                              Registry whois output FSM template file. ($CONFIG)
+      --pushgateway="http://localhost:9091"  
+                              host:port where Pushgateway lives ($CONFIG)
+      --[no-]debug-whois      print whois output and skip pushing metrics ($CONFIG)
       --log.level=info        Only log messages with the given severity or above. One of: [debug, info, warn, error]
       --log.format=logfmt     Output format of log messages. One of: [logfmt, json]
-      --version               Show application version.
+      --[no-]version          Show application version.
 ```
 
-### Docker image
+### Example Domain Config
+See domains.yml
 
-We publish a docker image [on the Quay registry](https://quay.io/repository/shift/domain_exporter). You can pull this with `docker pull ghcr.io/shift/domain_exporter`.
+### Example textFSM Template
+See whois.textfsm
 
-### Running on Kubernetes
+### Example Prometheus Alerts
 
-[Here](contrib/k8s-domain-exporter.yaml) is an example Kubernetes deployment configuration for how to deploy the domain_exporter.
-
-### Example Prometheus Alert
-
-The following alert will be triggered when domains expire within 45 days, or if
-they don't have a whois record available (perhaps having been long expired).
 
 ```yaml
-groups:
- - name: ./domain.rules
-   rules:
-    - alert: DomainExpiring
-      expr: domain_expiration{} < 45
-      for: 24h
+- name: DomainMetricsAlerts
+  rules:
+    - alert: DomainWhoisDataNotInSync
+      expr: domain_state_desired == 0
+      for: 0m
       labels:
         severity: warning
       annotations:
-        description: "{{ $labels.domain }} expires in {{ $value }} days"
-    - alert: DomainUnfindable
-      expr: domain_expiration_unfindable > 0
-      for: 24h
+        summary: Domain {{ $labels.domain }} WHOIS data is not as expected in domain_metrics_pusher
+        description: Domain {{ $labels.domain }} WHOIS data is not as expected in domain_metrics_pusher. Misconfiguration or failure/hijack attempt at registrar/registry?
+
+    - alert: DomainExpiring
+      expr: domain_expiration_seconds{} < time() + 60 * 60 * 24 * 30
+      for: 0m
       labels:
         severity: critical
       annotations:
-        description: "Unable to find or parse expiry for {{ $labels.domain }}"
-    - alert: DomainMetricsAbsent
-      expr: absent(domain_expiration) > 0
-      for: 1h
+        summary: domain {{ $labels.domain }} is going to expire in less than 30 days. Renew?! 
+        description: domain {{ $labels.domain }} is going to expire in less than 30 days. Renew?! Expiration timestamp is {{ $value }} 
+
+    - alert: DomainMetricExporterOverdue
+      expr: domain_information_last_successfully_parsed{} < time() - 60 * 60 * 26
+      for: 0m
       labels:
         severity: warning
       annotations:
-        description: "Metrics for domain-exporter are absent"
+        summary: domain_metric_pusher has not ran successfully in the prescribed timeframe. Check the service. 
+        description: domain_metric_pusher has not ran successfully in the prescribed timeframe. Check the service. Last successful run at {{ $value }} 
+
 ```
 
 ### FAQ
@@ -70,5 +68,3 @@ groups:
 The WHOIS resposne probably doesn't parse correctly. Please create an issue with the response and we'll add the format.
 
 
-## License
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fshift%2Fdomain_exporter.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fshift%2Fdomain_exporter?ref=badge_large)
