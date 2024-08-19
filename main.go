@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -191,31 +192,35 @@ func parse(configDomain ConfigDomain, res []byte, template []byte) (float64, tim
 
 		configStatus := configDomain.Status
 		actualStatus := v["status"].([]string)
-		slices.Sort(configStatus)
-		slices.Sort(actualStatus)
-		if len(configStatus) > 0 && !slices.Equal(configStatus, actualStatus) {
-			parametersConsistent = 0
-			log.Printf("Domain %s WHOIS status %s is not the same as configured expected status %s", configDomain.Domain, actualStatus, configStatus)
+		if len(actualStatus) > 0 && len(configStatus) > 0 {
+			configStatus = normalizeSlice(configStatus)
+			actualStatus = normalizeSlice(actualStatus)
+			if !slices.Equal(configStatus, actualStatus) {
+				parametersConsistent = 0
+				log.Printf("Domain %s WHOIS status %s is not the same as configured expected status %s", configDomain.Domain, actualStatus, configStatus)
 
+			}
 		}
-		if len(configDomain.Dnssec) > 0 && configDomain.Dnssec != v["dnssec"].(string) {
+		if len(configDomain.Dnssec) > 0 && strings.ToLower(configDomain.Dnssec) != strings.ToLower(v["dnssec"].(string)) {
 			parametersConsistent = 0
 			log.Printf("Domain %s WHOIS dnssec status %s is not the same as configured expected dnssec status %s", configDomain.Domain, v["dnssec"].(string), configDomain.Dnssec)
 
 		}
-		if len(configDomain.Registrar) > 0 && configDomain.Registrar != v["registrar"].(string) {
+		if len(configDomain.Registrar) > 0 && strings.ToLower(configDomain.Registrar) != strings.ToLower(v["registrar"].(string)) {
 			parametersConsistent = 0
 			log.Printf("Domain %s WHOIS registrar %s is not the same as configured expected registrar %s", configDomain.Domain, v["registrar"].(string), configDomain.Registrar)
 
 		}
 		configNameservers := configDomain.Nameservers
 		actualNameservers := v["nServer"].([]string)
-		slices.Sort(configNameservers)
-		slices.Sort(actualNameservers)
-		if len(configNameservers) > 0 && !slices.Equal(configNameservers, actualNameservers) {
-			parametersConsistent = 0
-			log.Printf("Domain %s WHOIS nameservers %s is not the same as configured expected nameservers  %s", configDomain.Domain, actualNameservers, configNameservers)
+		if len(actualNameservers) > 0 && len(configNameservers) > 0 {
+			configNameservers = normalizeSlice(configNameservers)
+			actualNameservers = normalizeSlice(actualNameservers)
+			if !slices.Equal(configNameservers, actualNameservers) {
+				parametersConsistent = 0
+				log.Printf("Domain %s WHOIS nameservers %s is not the same as configured expected nameservers  %s", configDomain.Domain, actualNameservers, configNameservers)
 
+			}
 		}
 	}
 
@@ -231,4 +236,17 @@ func parseDate(rawDate string, domain string) time.Time {
 	}
 	log.Fatalf("Domain %s: unable to parse raw date to timestamp: %s\n", domain, rawDate)
 	return time.Time{}
+}
+
+func normalizeSlice(a []string) []string {
+	var b []string
+	if len(a) > 0 {
+		for _, v := range a {
+			t := strings.ToLower(v)
+			t = strings.TrimSuffix(t, ".")
+			b = append(b, t)
+		}
+		slices.Sort(b)
+	}
+	return b
 }
