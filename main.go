@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
 	"github.com/prometheus/common/version"
-	"github.com/sirikothe/gotextfsm"
+	"github.com/wwijkander/gotextfsm"
 	"gopkg.in/yaml.v2"
 )
 
