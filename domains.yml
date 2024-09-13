@@ -17,7 +17,6 @@ domains:
   - domain: dh.ax
     status:
       - Registered
-  - domain: bahnhof.net
   - domain: root-servers.net
     status:
       - serverUpdateProhibited
@@ -37,6 +36,5 @@ domains:
       - K.ROOT-SERVERS.NET
       - L.ROOT-SERVERS.NET
       - M.ROOT-SERVERS.NET
-      - ö.root-servers.net
     dnssec: unsigned
-    registrar: Netwörk Solutions, LLC 
+    registrar: Network Solutions, LLC

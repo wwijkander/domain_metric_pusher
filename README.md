@@ -21,10 +21,10 @@ Flags:
 ```
 
 ### Example Domain Config
-See domains.yml
+See domains.yml. Note that the non-date data is expected to be as it is presented in the WHOIS response. For example, status can be "ok", "Registered", etc.
 
 ### Example textFSM Template
-See whois.textfsm
+See whois.textfsm and https://github.com/google/textfsm/wiki/TextFSM
 
 ### Example Prometheus Alerts
 
@@ -59,6 +59,61 @@ See whois.textfsm
         summary: domain_metric_pusher has not ran successfully in the prescribed timeframe. Check the service. 
         description: domain_metric_pusher has not ran successfully in the prescribed timeframe. Check the service. Last successful run at {{ $value }} 
 
+```
+
+### Example systemd timer and unit
+
+```
+# /etc/systemd/system/domain_metric_pusher.timer
+[Unit]
+Description=daily domain_metric_pusher run
+Documentation=
+
+[Timer]
+OnCalendar=daily
+AccuracySec=2h
+
+[Install]
+WantedBy=timers.target
+```
+```
+# /etc/systemd/system/domain_metric_pusher.service
+[Unit]
+Description=domain_metric_pusher
+Documentation=https://github.com/wwijkander/domain_metric_pusher
+After=network-online.target
+Requires=local-fs.target
+After=local-fs.target
+
+[Service]
+Restart=on-failure
+Type=simple
+User=prometheus
+Group=prometheus
+ExecStart=/opt/domain_metric_pusher/domain_metric_pusher --config="/opt/domain_metric_pusher/domains.yml" --template="/opt/domain_metric_pusher/whois.textfsm"
+TimeoutStopSec=20s
+SendSIGKILL=no
+CapabilityBoundingSet=CAP_SET_UID
+LimitNOFILE=65000
+LockPersonality=true
+NoNewPrivileges=true
+MemoryDenyWriteExecute=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+RemoveIPC=true
+RestrictSUIDSGID=true
+#SystemCallFilter=@signal @timer
+ReadOnlyPaths=/opt/domain_metric_pusher
+PrivateUsers=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+SyslogIdentifier=domain_metric_pusher
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ### FAQ
