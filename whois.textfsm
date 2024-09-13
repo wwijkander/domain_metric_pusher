@@ -1,18 +1,18 @@
-Value List status ([a-zA-Z_\-:/#]+)
+Value List status (([a-zA-Z_\-]+\s)+)
 Value expiryDate ([0-9a-zA-Z\-\.:\s/]+)
 # our assumptions about DNS servers:
 # at least one alphanumeric(inc dash) field separated by dots,
-# after whitespace possibly followed by IPv4 and/or IPv6 addresses,
+# after that whitespace possibly followed by IPv4 and/or IPv6 addresses,
 # these are possibly enclosed in []
 # NB we do not care about IPv4/v6 addresses being syntactically correct for now
-Value List nServer (([0-9a-zA-Z\-])+(\.[0-9a-zA-Z\-]+)*(\s\[{0,1}([0-9A-Fa-f]{1,4}){1}((\.|:|::)[0-9A-Fa-f]{1,4}){3,7}\]{0,1})*)
-Value dnssec ([a-zA-Z\.\-\s]+)
+Value List nServer (([0-9a-zA-Z\-])+(\.[0-9a-zA-Z\-]+)*(\s(\[|\(){0,1}([0-9A-Fa-f]{1,4}){1}((\.|:|::)[0-9A-Fa-f]{1,4}){3,7}(\]|\)|,){0,1})*)
+Value dnssec ([0-9a-zA-Z\.\-\s]+)
 Value registrar (.+)
 
 Start
-  ^(?i)\s*(\[ロック状態]|(domain\s)*status\.*:)\s*${status}(\shttps://icann.org/.*)*
-  ^(?i)\s*(\[有効期限]|paid-till:|(registr(y|ar\sregistration)\s)*expir(y|e(s|-date)|ation)(\sdate|\stime)*\.*:)\s*${expiryDate}
+  ^(?i)\s*(\[ロック状態]|(domain\s)*status\.*:)\s*${status}\shttp(s|):
+  ^(?i)\s*(\[有効期限]|paid-till:|(registr(y|ar\sregistration)\s)*expir(y|e(s|-date|)|ation)(\sdate|\stime)*\.*:)\s*${expiryDate}
   ^(?i)\s*\[*(name\s|n)server\]*\.*:*\s*${nServer}(\.|\s\[OK])*
-  ^(?i)\s*dnssec\.*:\s*${dnssec}
+  ^(?i)\s*(dnssec(\ssigned){0,1}|dsrecord|keyset)\.*:\s*${dnssec}
   ^(?i)\s*(sponsoring\s)*registrar\.*:\s*${registrar}
 

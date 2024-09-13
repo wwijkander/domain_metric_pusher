@@ -1,0 +1,39 @@
+% Copyright (c) Nic.br
+%  The use of the data below is only permitted as described in
+%  full by the Use and Privacy Policy at https://registro.br/upp ,
+%  being prohibited its distribution, commercialization or
+%  reproduction, in particular, to use it for advertising or
+%  any similar purpose.
+%  2024-08-19T08:44:08-03:00 - IP: x
+
+domain:      maxexperiencia.com.br
+owner:       MM Turismo & Viagens S.A.
+owner-c:     MAOLI699
+tech-c:      MAOLI699
+nserver:     a.auto.dns.br
+nsstat:      20240816 AA
+nslastaa:    20240816
+nserver:     b.auto.dns.br
+nsstat:      20240816 AA
+nslastaa:    20240816
+dsrecord:    33150 ECDSA-SHA-256 5B797E534DEEBAAAD1BDE59F6B06E5AE65580E8E67F8C64152AE6A9A735FF97A
+dsstatus:    20240814 DSOK
+dslastok:    20240814
+saci:        yes
+created:     20200729 #21466303
+changed:     20220726
+expires:     20250729
+status:      published
+
+nic-hdl-br:  MAOLI699
+person:      Max Oliveira
+created:     20120708
+changed:     20240607
+
+% Security and mail abuse issues should also be addressed to
+% cert.br, http://www.cert.br/ , respectivelly to cert@cert.br
+% and mail-abuse@cert.br
+%
+% whois.registro.br accepts only direct match queries. Types
+% of queries are: domain (.br), registrant (tax ID), ticket,
+% provider, CIDR block, IP and ASN.
